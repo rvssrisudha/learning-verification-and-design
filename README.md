@@ -43,17 +43,36 @@ Here, I document the projects that helped me grow my knowledge step-by-step:
 - [AXI Memory Protocol Verification](./00_First_Steps_in_Verification/AXI_Memory_Verification)
 - [UART Protocol Verification](./00_First_Steps_in_Verification/UART_Protocol_Verification)
 
+---
+
 ### 🧩 Phase 1: Foundation (Building Digital Systems)
 - [High-Speed Convolution Accelerator on FPGA](./01_Foundation/HighSpeed_Convolution_Accelerator)
+
+---
 
 ### 🧠 Phase 2: System Thinking (Analyzing System Performance)
 - [CPU-GPU Performance Analysis](./02_System_Thinking/CPU_GPU_Performance_Analysis)
 
+---
+
 ### 🧹 Phase 3: Formal Discipline (Ensuring Correctness)
 - [AES-128 Formal Verification](./03_Formal_Discipline/AES128_Formal_Verification)
 
+---
+
 ### 🤖 Phase 4: Intelligence Enhancement (Applying ML in Hardware)
 - [ML-Based Transistor Power Prediction](./04_Intelligence_Enhancement/ML_Based_Transistor_Power_Prediction)
+
+---
+
+### 🚀 Phase 5: Core Verification Growth (Deep UVM and Coverage Driven Verification)
+- 16-bit MIPS Processor Verification 
+- YAPP Protocol Router Verification
+
+---
+
+### 🔒 Phase 6: Security Awareness (Hardware Trust and Protection)
+- Hardware Trojan Insertion and Detection
 
 ---
 

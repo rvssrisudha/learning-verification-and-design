@@ -857,3 +857,205 @@ module tb;
   assign vif.next_addrrd = dut.rdnextaddr;
   
 endmodule
+
+
+
+
+//////Another method without using the pointer from the DUT and using a reference model to calculate the next address pointer:
+
+
+`include "uvm_macros.svh"
+import uvm_pkg::*;
+
+//-------------------------------------------------------------
+// AXI Transaction Class
+//-------------------------------------------------------------
+typedef enum bit [2:0] {wrrdfixed = 0, wrrdincr = 1, wrrdwrap = 2, wrrderrfix = 3, rstdut = 4} oper_mode;
+
+class transaction extends uvm_sequence_item;
+  `uvm_object_utils(transaction)
+
+  rand bit [3:0] id;
+  oper_mode op;
+
+  rand bit awvalid;
+  bit awready;
+  bit [3:0] awid;
+  rand bit [3:0] awlen;
+  rand bit [2:0] awsize;
+  rand bit [31:0] awaddr;
+  rand bit [1:0] awburst;
+
+  bit wvalid;
+  bit wready;
+  bit [3:0] wid;
+  rand bit [31:0] wdata;
+  rand bit [3:0] wstrb;
+  bit wlast;
+
+  bit bready;
+  bit bvalid;
+  bit [3:0] bid;
+  bit [1:0] bresp;
+
+  rand bit arvalid;
+  bit arready;
+  bit [3:0] arid;
+  rand bit [3:0] arlen;
+  bit [2:0] arsize;
+  rand bit [31:0] araddr;
+  rand bit [1:0] arburst;
+
+  bit rvalid;
+  bit rready;
+  bit [3:0] rid;
+  bit [31:0] rdata;
+  bit [3:0] rstrb;
+  bit rlast;
+  bit [1:0] rresp;
+
+  int beat_num;
+
+  constraint txid { awid == id; wid == id; bid == id; arid == id; rid == id; }
+  constraint burst {awburst inside {0,1,2}; arburst inside {0,1,2};}
+  constraint valid {awvalid != arvalid;}
+  constraint length {awlen == arlen;}
+
+  function new(string name = "transaction");
+    super.new(name);
+  endfunction
+
+endclass
+
+//-------------------------------------------------------------
+// AXI Reference Model Class
+//-------------------------------------------------------------
+class axi_reference_model;
+  static function logic [31:0] calc_next_addr(
+    input logic [31:0] base_addr,
+    input logic [2:0] size,
+    input logic [3:0] len,
+    input logic [1:0] burst_type,
+    input int beat_index
+  );
+    logic [31:0] beat_size = 1 << size;
+    logic [31:0] wrap_boundary = beat_size * (len + 1);
+    logic [31:0] addr;
+
+    case (burst_type)
+      2'b00: addr = base_addr;
+      2'b01: addr = base_addr + beat_index * beat_size;
+      2'b10: begin
+        addr = base_addr + beat_index * beat_size;
+        if (addr >= ((base_addr & ~(wrap_boundary - 1)) + wrap_boundary))
+          addr = addr - wrap_boundary;
+      end
+      default: addr = base_addr;
+    endcase
+    return addr;
+  endfunction
+endclass
+
+//-------------------------------------------------------------
+// Monitor (per beat transaction)
+//-------------------------------------------------------------
+class monitor extends uvm_monitor;
+`uvm_component_utils(monitor)
+
+uvm_analysis_port#(transaction) ap;
+virtual axi_if vif;
+
+function new(string name = "monitor", uvm_component parent = null);
+  super.new(name, parent);
+endfunction
+
+virtual function void build_phase(uvm_phase phase);
+  super.build_phase(phase);
+  ap = new("ap", this);
+  if (!uvm_config_db#(virtual axi_if)::get(this, "", "vif", vif))
+    `uvm_error("MON", "Cannot get interface");
+endfunction
+
+virtual task run_phase(uvm_phase phase);
+  forever begin
+    @(posedge vif.clk);
+    if (!vif.resetn)
+      continue;
+
+    // Write path
+    if (vif.awvalid) begin
+      for (int i = 0; i <= vif.awlen; i++) begin
+        @(posedge vif.wvalid);
+        transaction t = transaction::type_id::create("t");
+        t.op = wrrdfixed;
+        t.awaddr = vif.awaddr;
+        t.awburst = vif.awburst;
+        t.awsize = vif.awsize;
+        t.awlen = vif.awlen;
+        t.beat_num = i;
+        t.wdata = vif.wdata;
+        ap.write(t);
+        @(posedge vif.clk);
+      end
+      @(posedge vif.bvalid);
+    end
+
+    // Read path
+    if (vif.arvalid) begin
+      for (int i = 0; i <= vif.arlen; i++) begin
+        @(posedge vif.rvalid);
+        transaction t = transaction::type_id::create("t");
+        t.op = wrrdfixed;
+        t.araddr = vif.araddr;
+        t.arburst = vif.arburst;
+        t.arsize = vif.arsize;
+        t.arlen = vif.arlen;
+        t.beat_num = i;
+        t.rdata = vif.rdata;
+        ap.write(t);
+        @(posedge vif.clk);
+      end
+      @(posedge vif.rlast);
+    end
+  end
+endtask
+
+endclass
+
+//-------------------------------------------------------------
+// Scoreboard
+//-------------------------------------------------------------
+class scoreboard extends uvm_scoreboard;
+`uvm_component_utils(scoreboard)
+
+uvm_analysis_imp#(transaction, scoreboard) imp;
+logic [31:0] mem_model[128];
+
+function new(string name = "scoreboard", uvm_component parent = null);
+  super.new(name, parent);
+endfunction
+
+virtual function void build_phase(uvm_phase phase);
+  super.build_phase(phase);
+  imp = new("imp", this);
+endfunction
+
+virtual function void write(transaction t);
+  if (t.wdata !== 'x) begin
+    logic [31:0] addr = axi_reference_model::calc_next_addr(t.awaddr, t.awsize, t.awlen, t.awburst, t.beat_num);
+    mem_model[addr] = t.wdata;
+    `uvm_info("SCOREBOARD", $sformatf("WRITE -> Addr: %0h, Data: %0h", addr, t.wdata), UVM_LOW);
+  end
+
+  if (t.rdata !== 'x) begin
+    logic [31:0] addr = axi_reference_model::calc_next_addr(t.araddr, t.arsize, t.arlen, t.arburst, t.beat_num);
+    logic [31:0] expected = mem_model[addr];
+    if (expected !== t.rdata)
+      `uvm_error("SCOREBOARD", $sformatf("READ FAIL Addr: %0h, Expected: %0h, Got: %0h", addr, expected, t.rdata));
+    else
+      `uvm_info("SCOREBOARD", $sformatf("READ PASS Addr: %0h, Data: %0h", addr, t.rdata), UVM_LOW);
+  end
+endfunction
+
+endclass
+
